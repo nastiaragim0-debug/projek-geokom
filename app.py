@@ -1,18 +1,22 @@
-"""
-╔══════════════════════════════════════════════════════════════════╗
-║       SIMULASI ROBOT PEMBERSIH RUANGAN - STREAMLIT VERSION      ║
-║       Teknologi: Python + Streamlit + Matplotlib + NumPy        ║
-║       Konsep: Robot Motion Planning (Geometri Komputasi)        ║
-╚══════════════════════════════════════════════════════════════════╝
+# =========================================================
+# SIMULASI ROBOT PEMBERSIH RUANGAN - STREAMLIT VERSION
+# =========================================================
+# Teknologi:
+# - Python
+# - Streamlit
+# - Matplotlib
+# - NumPy
+#
+# Fitur:
+# - Robot bergerak otomatis
+# - Obstacle avoidance
+# - Persentase kebersihan realtime
+# - Posisi robot realtime
+# - Langkah robot realtime
+# - Tombol Start / Pause / Reset
+# - FPS lebih smooth
+# =========================================================
 
-CARA MENJALANKAN:
-    pip install streamlit matplotlib numpy
-    streamlit run app.py
-"""
-
-# ─────────────────────────────────────────────
-# IMPOR LIBRARY
-# ─────────────────────────────────────────────
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,41 +25,51 @@ from matplotlib.colors import ListedColormap
 import matplotlib.patheffects as pe
 import time
 
-# ─────────────────────────────────────────────
-# KONFIGURASI GLOBAL
-# ─────────────────────────────────────────────
-ROOM_WIDTH  = 20
+# =========================================================
+# KONFIGURASI
+# =========================================================
+ROOM_WIDTH = 20
 ROOM_HEIGHT = 15
-GRID_RES    = 0.25
+
+GRID_RES = 0.25
+
 ROBOT_RADIUS = 0.5
-ROBOT_SPEED  = 0.18
+ROBOT_SPEED = 0.18
+
 SENSOR_RANGE = 1.8
 CLEAN_RADIUS = 0.7
+
 TRAIL_MAXLEN = 180
 
-# Warna
-COLOR_FLOOR_DIRTY  = "#1a1a2e"
-COLOR_OBSTACLE_BG  = "#533483"
-COLOR_ROBOT        = "#e94560"
-COLOR_ROBOT_GLOW   = "#ff6b6b"
-COLOR_TRAIL        = "#4ecdc4"
-COLOR_SENSOR       = "#f7d794"
-COLOR_BG           = "#0d0d1a"
+# warna
+COLOR_FLOOR_DIRTY = "#1a1a2e"
+COLOR_OBSTACLE_BG = "#533483"
+COLOR_ROBOT = "#e94560"
+COLOR_ROBOT_GLOW = "#ff6b6b"
+COLOR_TRAIL = "#4ecdc4"
+COLOR_SENSOR = "#f7d794"
+COLOR_BG = "#0d0d1a"
 
-# ─────────────────────────────────────────────
-# KELAS OBSTACLE
-# ─────────────────────────────────────────────
+# =========================================================
+# CLASS OBSTACLE
+# =========================================================
 class Obstacle:
+
     def __init__(self, x, y, w, h, label="", color="#533483"):
+
         self.x = x
         self.y = y
+
         self.w = w
         self.h = h
+
         self.label = label
         self.color = color
+
         self.margin = ROBOT_RADIUS + 0.15
 
     def get_expanded_bounds(self):
+
         return (
             self.x - self.margin,
             self.y - self.margin,
@@ -64,45 +78,58 @@ class Obstacle:
         )
 
     def contains_point(self, px, py):
+
         x0, y0, x1, y1 = self.get_expanded_bounds()
+
         return x0 <= px <= x1 and y0 <= py <= y1
 
     def distance_to_point(self, px, py):
+
         cx = max(self.x, min(px, self.x + self.w))
         cy = max(self.y, min(py, self.y + self.h))
-        return np.sqrt((px - cx)**2 + (py - cy)**2)
 
-# ─────────────────────────────────────────────
-# KELAS ROBOT
-# ─────────────────────────────────────────────
+        return np.sqrt((px - cx) ** 2 + (py - cy) ** 2)
+
+# =========================================================
+# CLASS ROBOT
+# =========================================================
 class CleaningRobot:
 
     def __init__(self, x, y, obstacles, grid_cols, grid_rows):
+
         self.x = float(x)
         self.y = float(y)
+
         self.angle = np.random.uniform(0, 2 * np.pi)
 
         self.obstacles = obstacles
+
         self.grid_cols = grid_cols
         self.grid_rows = grid_rows
 
-        self.running = False
-        self.stuck_count = 0
         self.step_count = 0
+        self.stuck_count = 0
 
         self.trail_x = []
         self.trail_y = []
 
     def sense_obstacles(self):
+
         detected = []
+
         for obs in self.obstacles:
+
             dist = obs.distance_to_point(self.x, self.y)
+
             if dist < SENSOR_RANGE:
                 detected.append((dist, obs))
+
         return detected
 
     def compute_avoidance_vector(self, detected):
-        avoid_x, avoid_y = 0.0, 0.0
+
+        avoid_x = 0.0
+        avoid_y = 0.0
 
         for dist, obs in detected:
 
@@ -127,7 +154,9 @@ class CleaningRobot:
     def compute_wall_avoidance(self):
 
         wall_margin = ROBOT_RADIUS + 0.3
-        wx, wy = 0.0, 0.0
+
+        wx = 0.0
+        wy = 0.0
 
         if self.x < wall_margin:
             wx += (wall_margin - self.x) / wall_margin * 3
@@ -143,39 +172,6 @@ class CleaningRobot:
 
         return wx, wy
 
-    def find_nearest_uncleaned_direction(self, clean_grid):
-
-        gr = int(self.y / GRID_RES)
-        gc = int(self.x / GRID_RES)
-
-        best_dist = float('inf')
-        best_angle = None
-
-        search_r = int(5.0 / GRID_RES)
-
-        for dr in range(-search_r, search_r + 1, 2):
-            for dc in range(-search_r, search_r + 1, 2):
-
-                nr, nc = gr + dr, gc + dc
-
-                if 0 <= nr < self.grid_rows and 0 <= nc < self.grid_cols:
-
-                    if clean_grid[nr, nc] == 0:
-
-                        wx = nc * GRID_RES + GRID_RES / 2
-                        wy = nr * GRID_RES + GRID_RES / 2
-
-                        dist = np.sqrt((wx - self.x)**2 + (wy - self.y)**2)
-
-                        if dist < best_dist:
-                            best_dist = dist
-                            best_angle = np.arctan2(
-                                wy - self.y,
-                                wx - self.x
-                            )
-
-        return best_angle
-
     def step(self, clean_grid):
 
         self.step_count += 1
@@ -188,21 +184,10 @@ class CleaningRobot:
         move_x = np.cos(self.angle)
         move_y = np.sin(self.angle)
 
-        if len(detected) == 0 and np.random.random() < 0.05:
-
-            target_angle = self.find_nearest_uncleaned_direction(clean_grid)
-
-            if target_angle is not None:
-
-                angle_diff = target_angle - self.angle
-                angle_diff = (angle_diff + np.pi) % (2 * np.pi) - np.pi
-
-                self.angle += angle_diff * 0.2
-
         total_x = move_x + avoid_x * 0.8 + wall_x
         total_y = move_y + avoid_y * 0.8 + wall_y
 
-        noise = 0.15
+        noise = 0.12
 
         total_x += np.random.uniform(-noise, noise)
         total_y += np.random.uniform(-noise, noise)
@@ -220,6 +205,7 @@ class CleaningRobot:
         collision = False
 
         for obs in self.obstacles:
+
             if obs.contains_point(new_x, new_y):
                 collision = True
                 break
@@ -230,27 +216,35 @@ class CleaningRobot:
         new_y = max(r, min(ROOM_HEIGHT - r, new_y))
 
         if not collision:
+
             self.x = new_x
             self.y = new_y
+
             self.stuck_count = 0
+
         else:
+
             self.angle += np.pi + np.random.uniform(-0.5, 0.5)
+
             self.stuck_count += 1
 
         if self.stuck_count > 25:
+
             self.angle = np.random.uniform(0, 2 * np.pi)
+
             self.stuck_count = 0
 
         self.trail_x.append(self.x)
         self.trail_y.append(self.y)
 
         if len(self.trail_x) > TRAIL_MAXLEN:
+
             self.trail_x.pop(0)
             self.trail_y.pop(0)
 
-        self._mark_clean(clean_grid)
+        self.mark_clean(clean_grid)
 
-    def _mark_clean(self, clean_grid):
+    def mark_clean(self, clean_grid):
 
         cx = int(self.x / GRID_RES)
         cy = int(self.y / GRID_RES)
@@ -260,7 +254,8 @@ class CleaningRobot:
         for dr in range(-cr, cr + 1):
             for dc in range(-cr, cr + 1):
 
-                gr, gc = cy + dr, cx + dc
+                gr = cy + dr
+                gc = cx + dc
 
                 if 0 <= gr < self.grid_rows and 0 <= gc < self.grid_cols:
 
@@ -268,16 +263,16 @@ class CleaningRobot:
                     cell_y = gr * GRID_RES + GRID_RES / 2
 
                     dist = np.sqrt(
-                        (cell_x - self.x)**2 +
-                        (cell_y - self.y)**2
+                        (cell_x - self.x) ** 2 +
+                        (cell_y - self.y) ** 2
                     )
 
                     if dist <= CLEAN_RADIUS:
                         clean_grid[gr, gc] = 1
 
-# ─────────────────────────────────────────────
-# SIMULASI
-# ─────────────────────────────────────────────
+# =========================================================
+# CLASS SIMULATION
+# =========================================================
 class RoomCleaningSimulation:
 
     def __init__(self):
@@ -290,9 +285,9 @@ class RoomCleaningSimulation:
             dtype=np.uint8
         )
 
-        self.obstacles = self._create_obstacles()
+        self.obstacles = self.create_obstacles()
 
-        self._mark_obstacle_cells()
+        self.mark_obstacle_cells()
 
         self.robot = CleaningRobot(
             2.0,
@@ -304,7 +299,7 @@ class RoomCleaningSimulation:
 
         self.total_cleanable = int(np.sum(self.clean_grid == 0))
 
-    def _create_obstacles(self):
+    def create_obstacles(self):
 
         return [
 
@@ -317,7 +312,7 @@ class RoomCleaningSimulation:
             Obstacle(8.5, 6.5, 1.5, 1.5, "Tanaman", "#16a085"),
         ]
 
-    def _mark_obstacle_cells(self):
+    def mark_obstacle_cells(self):
 
         for obs in self.obstacles:
 
@@ -331,14 +326,18 @@ class RoomCleaningSimulation:
 
     def update(self):
 
-        for _ in range(3):
+        for _ in range(6):
             self.robot.step(self.clean_grid)
 
     def draw(self):
 
-        fig, ax = plt.subplots(figsize=(12, 8))
+        fig, ax = plt.subplots(
+            figsize=(10, 6),
+            dpi=85
+        )
 
         fig.patch.set_facecolor(COLOR_BG)
+
         ax.set_facecolor(COLOR_FLOOR_DIRTY)
 
         cmap_clean = ListedColormap([
@@ -354,7 +353,8 @@ class RoomCleaningSimulation:
             cmap=cmap_clean,
             vmin=0,
             vmax=2,
-            alpha=0.9
+            interpolation='nearest',
+            alpha=1.0
         )
 
         # obstacle
@@ -365,7 +365,7 @@ class RoomCleaningSimulation:
                 obs.w,
                 obs.h,
                 boxstyle="round,pad=0.08",
-                linewidth=1.5,
+                linewidth=1.2,
                 edgecolor="white",
                 facecolor=obs.color,
                 alpha=0.9
@@ -379,7 +379,7 @@ class RoomCleaningSimulation:
                 obs.label,
                 ha='center',
                 va='center',
-                fontsize=8,
+                fontsize=7,
                 color='white',
                 fontweight='bold',
                 path_effects=[
@@ -387,12 +387,12 @@ class RoomCleaningSimulation:
                 ]
             )
 
-        # trail
+        # trail robot
         ax.plot(
             self.robot.trail_x,
             self.robot.trail_y,
             color=COLOR_TRAIL,
-            linewidth=1.5,
+            linewidth=1,
             alpha=0.6
         )
 
@@ -402,13 +402,14 @@ class RoomCleaningSimulation:
             SENSOR_RANGE,
             fill=False,
             linestyle='--',
+            linewidth=0.8,
             color=COLOR_SENSOR,
             alpha=0.3
         )
 
         ax.add_patch(sensor)
 
-        # robot glow
+        # glow
         glow = plt.Circle(
             (self.robot.x, self.robot.y),
             ROBOT_RADIUS + 0.25,
@@ -441,6 +442,11 @@ class RoomCleaningSimulation:
         ax.set_xlim(0, ROOM_WIDTH)
         ax.set_ylim(0, ROOM_HEIGHT)
 
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        ax.set_aspect('equal')
+
         ax.set_title(
             "🤖 AI Robot Vacuum Cleaner Simulation",
             fontsize=16,
@@ -448,73 +454,120 @@ class RoomCleaningSimulation:
             fontweight='bold'
         )
 
-        ax.set_aspect('equal')
-
         return fig
 
-# ─────────────────────────────────────────────
+# =========================================================
 # STREAMLIT APP
-# ─────────────────────────────────────────────
+# =========================================================
 st.set_page_config(
-    page_title="Robot Vacuum Cleaner",
+    page_title="Robot Cleaner",
     layout="wide"
 )
 
 st.title("🤖 Simulasi Robot Pembersih Ruangan")
-st.markdown("### Motion Planning + Obstacle Avoidance")
 
 # session state
 if "sim" not in st.session_state:
     st.session_state.sim = RoomCleaningSimulation()
 
+if "running" not in st.session_state:
+    st.session_state.running = False
+
 sim = st.session_state.sim
 
-# tombol
-col1, col2 = st.columns(2)
+# =========================================================
+# SIDEBAR CONTROL
+# =========================================================
+st.sidebar.title("🎮 Kontrol")
 
-with col1:
-    start = st.button("▶ START")
+if st.sidebar.button("▶ START"):
+    st.session_state.running = True
 
-with col2:
-    reset = st.button("↺ RESET")
+if st.sidebar.button("⏸ PAUSE"):
+    st.session_state.running = False
 
-if reset:
+if st.sidebar.button("↺ RESET"):
+
     st.session_state.sim = RoomCleaningSimulation()
+    st.session_state.running = False
+
     sim = st.session_state.sim
 
-# statistik
+# =========================================================
+# REALTIME PLACEHOLDER
+# =========================================================
+progress_placeholder = st.empty()
+
+metric_placeholder = st.empty()
+
+plot_placeholder = st.empty()
+
+status_placeholder = st.empty()
+
+# =========================================================
+# UPDATE REALTIME
+# =========================================================
 cleaned = int(np.sum(sim.clean_grid == 1))
-pct = (cleaned / max(sim.total_cleanable, 1)) * 100
 
-st.progress(min(int(pct), 100))
+pct = (
+    cleaned /
+    max(sim.total_cleanable, 1)
+) * 100
 
-col1, col2, col3 = st.columns(3)
+progress_placeholder.progress(min(int(pct), 100))
 
-col1.metric("Persentase Bersih", f"{pct:.1f}%")
-col2.metric("Langkah Robot", sim.robot.step_count)
-col3.metric(
-    "Posisi Robot",
-    f"({sim.robot.x:.1f}, {sim.robot.y:.1f})"
+col1, col2, col3 = metric_placeholder.columns(3)
+
+col1.metric(
+    "Persentase Bersih",
+    f"{pct:.1f}%"
 )
 
-# animasi
-placeholder = st.empty()
+col2.metric(
+    "Langkah Robot",
+    f"{sim.robot.step_count}"
+)
 
-if start:
+col3.metric(
+    "Posisi Robot",
+    f"({sim.robot.x:.2f}, {sim.robot.y:.2f})"
+)
 
-    for _ in range(300):
+# status
+if st.session_state.running:
+    status_placeholder.success("🟢 Robot Sedang Membersihkan")
+else:
+    status_placeholder.warning("⏸ Robot Pause")
 
-        sim.update()
+# =========================================================
+# LOOP ANIMASI
+# =========================================================
+if st.session_state.running:
 
-        fig = sim.draw()
+    sim.update()
 
-        placeholder.pyplot(fig)
+    fig = sim.draw()
 
-        plt.close(fig)
+    plot_placeholder.pyplot(
+        fig,
+        clear_figure=True,
+        use_container_width=True
+    )
 
-        time.sleep(0.03)
+    plt.close(fig)
+
+    time.sleep(0.001)
+
+    st.rerun()
 
 else:
+
     fig = sim.draw()
-    placeholder.pyplot(fig)
+
+    plot_placeholder.pyplot(
+        fig,
+        clear_figure=True,
+        use_container_width=True
+    )
+
     plt.close(fig)
